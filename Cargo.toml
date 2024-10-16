@@ -1,0 +1,10 @@
+[package]
+name = "ledger-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4.38"
+clap = { version = "4.5.19", features = ["derive"] }
+minijinja = { version = "2.3.1", features = ["builtins"] }
+regex = "1.11.0"
