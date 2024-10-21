@@ -15,7 +15,7 @@
         devShell = pkgs.mkShell {
           buildInputs =
             [ (rustVersion.override { extensions = [ "rust-src" ]; }) ];
-          packages = with pkgs; [  ];
+          packages = with pkgs; [ ];
         };
       });
 }
