@@ -1,7 +1,10 @@
-{ pkgs ? import <nixpkgs> { } }:
-pkgs.rustPlatform.buildRustPackage rec {
+{ rustPlatform, version ? "git", lib }:
+
+rustPlatform.buildRustPackage {
   pname = "pta-template-engine";
   inherit version;
-  src = pkgs.lib.cleanSource ./.;
+
+  src = lib.cleanSource ./.;
+
   cargoLock.lockFile = ./Cargo.lock;
 }
