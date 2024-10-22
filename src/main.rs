@@ -65,11 +65,8 @@ struct Cli {
     #[arg(short = 'D', long)]
     desc: String,
 
-    #[arg(short, long = "var")]
-    vars: Vec<String>,
-
-    #[arg(short, long = "override", value_name = "ENTRY")]
-    overrides: Vec<String>,
+    #[arg(short, long)]
+    context: String,
 }
 
 impl Cli {
@@ -95,37 +92,6 @@ impl Cli {
         }
 
         Ok(PathBuf::from(std::env::var("LEDGER_FILE")?))
-    }
-
-    pub fn parse_vars(&self) -> (HashMap<String, minijinja::Value>, Vec<String>) {
-        let mut bad_vars = Vec::new();
-        let good_vars: HashMap<String, minijinja::Value> = self
-            .vars
-            .iter()
-            .map(|v| {
-                let mut split = v.split("=");
-                (split.next(), split.last())
-            })
-            .filter_map(|(lhs, rhs)| match (lhs, rhs) {
-                (Some(l), Some(r)) => match r.parse::<i64>() {
-                    Ok(f) => Some((l.trim().to_string(), minijinja::Value::from(f))),
-                    Err(_) => Some((l.trim().to_string(), minijinja::Value::from(r))),
-                },
-                (None, Some(r)) => {
-                    bad_vars.push(r.trim().to_string());
-                    None
-                }
-                (Some(l), None) => {
-                    bad_vars.push(l.to_string());
-                    None
-                }
-                (None, None) => {
-                    bad_vars.push("".to_string());
-                    None
-                }
-            })
-            .collect();
-        (good_vars, bad_vars)
     }
 }
 
@@ -217,71 +183,27 @@ fn render_tempate(
     Ok(lines)
 }
 
-fn add_overrides(
-    defaults: &mut Vec<LineItem>,
-    overrides: &mut Vec<LineItem>,
-) -> Result<Vec<LineItem>, LedgerError> {
-    overrides.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    defaults.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    let mut lines: Vec<LineItem> = Vec::new();
-    let mut defaults = defaults.iter();
-    let mut overrides = overrides.iter();
-    let mut default = defaults.next();
-    let mut over = overrides.next();
-    loop {
-        match (over, default) {
-            (None, None) => break,
-            (Some(o), Some(d)) => match o.partial_cmp(d) {
-                Some(Ordering::Less) => {
-                    lines.push(o.to_owned());
-                    over = overrides.next();
-                }
-                Some(Ordering::Equal) => {
-                    lines.push(o.to_owned());
-                    over = overrides.next();
-                    default = defaults.next();
-                }
-                Some(Ordering::Greater) => {
-                    lines.push(d.to_owned());
-                    default = defaults.next();
-                }
-                None => {
-                    return Err(LedgerError::TransactionBuilder(
-                        TransactionBuilderError::DoesNotBalance(-1),
-                    ))
-                }
-            },
-            (Some(o), None) => {
-                lines.push(o.to_owned());
-                over = overrides.next();
-            }
-            (None, Some(d)) => {
-                lines.push(d.to_owned());
-                default = defaults.next();
-            }
-        }
-    }
-    Ok(lines)
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let (vars, bad_vars) = cli.parse_vars();
-    for var in bad_vars {
-        eprintln!(
-            "Skipping bad var \"{}\". Vars should be passed in the form of `-v name=value`",
-            var
-        );
-    }
     let journal = cli.get_journal()?;
-    let line_items =
-        match render_tempate(cli.template.as_path().to_path_buf(), journal, vars.into()) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("Failed to parse template because of {:?}", e);
-                return Err(e)?;
-            }
-        };
+    let context: serde_json::Value = match serde_json::from_str(&cli.context) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Could not parse context because of {}", e);
+            return Err(e)?;
+        }
+    };
+    let line_items = match render_tempate(
+        cli.template.as_path().to_path_buf(),
+        journal,
+        minijinja::Value::from_serialize(context),
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Failed to parse template because of {:?}", e);
+            return Err(e)?;
+        }
+    };
     let transaction = match TransactionBuilder::new()
         .date(cli.get_date())
         .desc(cli.desc)
